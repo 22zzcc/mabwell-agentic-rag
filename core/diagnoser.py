@@ -114,7 +114,7 @@ class Diagnoser:
             return "（知识库中未检索到相关内容）"
 
         # 取召回里最靠前的 _AGGREGATE_TOP_K 条做聚合（召回仍全量计数，见 recall_count）
-        top = hits[:_AGGREGATE_TOP_K]
+        top = hits[:self._AGGREGATE_TOP_K]
         blocks = []
         for i, h in enumerate(top, start=1):
             src = h.meta.get("heading_path", "") or h.meta.get("doc", "")
