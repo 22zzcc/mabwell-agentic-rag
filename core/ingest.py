@@ -45,13 +45,12 @@ def _read_docx(path: Path) -> str:
 
 
 def _read_pdf(path: Path) -> str:
-    """解析 .pdf（惰性导入 pypdf；扫描件 PDF 需另接 OCR，见 README）。"""
-    try:
-        import pypdf  # type: ignore
-    except ImportError as e:
-        raise RuntimeError(f"解析 {path.name} 需要 pypdf：pip install pypdf") from e
-    reader = pypdf.PdfReader(str(path))
-    return "\n".join((p.extract_text() or "") for p in reader.pages)
+    """解析 .pdf：走 core/pdf_parser.py 的完整管线。
+
+    数字版→版面提取(双栏顺序)；扫描件→OCR；统一做水印/页眉页脚/页码净化。
+    """
+    from .pdf_parser import parse_pdf
+    return parse_pdf(path)
 
 
 def ingest_directory(data_dir: str | Path, index_dir: str | Path | None = None) -> HybridIndex:

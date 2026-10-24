@@ -44,8 +44,10 @@
         │
         ▼
 core/ingest.py  解析文档(sample_data) → 建索引 → 落盘(data/index)
+   └── core/pdf_parser.py  企业 PDF：水印净化/双栏顺序/扫描件OCR/噪声过滤
 core/evaluate.py  Recall@5 / MRR@10 / 引用正确率 + badcase
-core/finetune_bge.py  BGE 领域微调（三元组 + 对比损失）
+core/finetune_bge.py  BGE 领域微调（三元组 + LoRA(PEFT)）
+core/diagnoser.py  多因诊断（降精度扩召回 → 罗列多种可能原因）
 core/api.py      FastAPI 服务（可选依赖）
 ```
 
@@ -56,11 +58,12 @@ core/api.py      FastAPI 服务（可选依赖）
 | `core/document_tree.py` | 还原「文档→章节→条目」三级层级 + 句界分块 | 知识库构建 |
 | `core/vector_store.py` | 手写 BM25 + 稠密向量 + RRF(k=60) 混合检索 + 本地持久化 | 混合检索 |
 | `core/embedding.py` | 本地 embedding + 余弦；可无缝切 BGE | BGE |
-| `core/finetune_bge.py` | 领域三元组构造 + 难负例挖掘 + MNR 对比损失微调 | BGE 微调 |
+| `core/finetune_bge.py` | 领域三元组 + 难负例挖矿 + **LoRA(PEFT) 微调**（全量微调作对比） | BGE 微调 + LoRA |
 | `core/agent.py` | rewrite→plan→action→verify→answer 五段循环 + 工具 | Agent 工作流 |
 | `core/diagnoser.py` | 多因聚合诊断：降精度扩召回 + LLM 聚类罗列多种可能原因 | 面向真实 trade-off |
 | `core/evaluate.py` | Recall@5 / MRR@10 / 引用正确率 + badcase | 评测体系 |
-| `core/ingest.py` | 文档解析（md/txt 原生，docx/pdf 可选）入库 | 解析手册/扫描件 |
+| `core/pdf_parser.py` | 企业 PDF 解析：水印净化 / 双栏顺序 / 扫描件 OCR / 噪声过滤 | 解析手册/扫描件 |
+| `core/ingest.py` | 文档解析（md/txt 原生，docx/pdf 走 pdf_parser 管线）入库 | 知识库构建 |
 | `core/llm.py` | 本地 Ollama 封装（chat/generate/JSON），优雅降级 | 本地推理 |
 | `core/config.py` | .env 三层装载 + 路径统一解析 | 落地工程化 |
 | `core/api.py` | FastAPI 服务封装 | FastAPI 落地 |
@@ -109,10 +112,31 @@ python main.py api
 | 症状描述（异响/过热） | 终点/工艺描述（主要终点、DAR、偶联） |
 | 手册/工单 | 研发方案/临床方案/CTD/GMP/SOP |
 
-`sample_data/` 内置 6 篇示例文档，覆盖研发、临床、注册、质量、药物警戒五条业务线，
+`sample_data/` 内置 9 篇示例文档，覆盖研发、临床、注册、质量、药物警戒、**内部政策、
+投资分析**七条业务线（不只「问题解决」类，也含政策合规与金融分析文档），
 是「本地数据库」的最小化样例；真实部署时把目录指向企业文档服务器即可。
 
-## 6. 多因诊断：降精度换召回的真实 trade-off（重点设计）
+## 6. 企业 PDF 解析：水印 / 双栏 / 扫描件
+
+企业里 PDF 是内部文件流通的**主要格式**，但直接 `extract_text()` 会把噪声 embed 进向量库。
+`core/pdf_parser.py` 按「检测 → 提取 → 净化」处理四类噪声：
+
+| 噪声 | 处理 |
+| :--- | :--- |
+| **水印**（对角线「内部资料/机密」） | 关键词短行剔除 + **跨页重复检测**（水印/页眉页脚在多数页逐字重复） |
+| **双栏排版**（论文/申报/分析报告） | 按 x 坐标聚类左右栏 + 空隙判定，先读左栏再读右栏 |
+| **扫描件**（无文本层） | `detect_pdf_type` 判型 → 路由到可插拔 OCR（rapidocr/paddleocr/tesseract/macOS Vision） |
+| **页码/页眉页脚/乱码** | `clean_text` 过滤页码、分隔线、乱码符号、单字符碎片 |
+
+```bash
+# 把带水印/双栏的真实 PDF 放进 sample_data 后重新建库即可
+python main.py ingest
+```
+
+> 依赖策略：只装 `pypdf` 即可处理「数字版 PDF + 水印净化」；装 `pymupdf`/`pdfplumber`
+> 获得双栏正确顺序；装 `rapidocr-onnxruntime` 才处理扫描件（均惰性导入，缺失给指引）。
+
+## 7. 多因诊断：降精度换召回的真实 trade-off（重点设计）
 
 **核心洞察**：一个故障/生物现象往往由**多种原因**造成。事实类问题（「主要终点是什么」）
 答案唯一，要追求 precision；但诊断类问题（「纯度为什么偏低」）答案是一个**集合**，
@@ -136,16 +160,17 @@ top_k 放大 3 倍）→ ② LLM 聚合（把候选聚类成「原因1/原因2/�
 ③ 结构化输出（原因清单 + 排查建议）。`sample_data/07_质量_纯度偏低根因分析.md` 是专门
 为这个场景写的多因样本。
 
-## 7. 简历指标如何复现
+## 8. 简历指标如何复现
 
 - **Recall@5 0.71→0.92、MRR@10 0.65→0.88**：`core/finetune_bge.py` 的
-  `build_triples()` 造领域三元组 → `train()` 微调 BGE → `evaluate_before_after()`
+  `build_triples()` 造领域三元组（BM25 难负例挖矿）→ `train_lora()` 用 **LoRA(PEFT)**
+  微调 BGE → `load_lora_model()` 加载「基座+adapter」替换检索向量 → `evaluate_before_after()`
   对比训练前后指标。本项目当前基线（通用 embedding，未微调）约 Recall@5≈0.88，
   微调后仍有提升空间——这正是面试时讲「领域微调价值」的现场素材。
 - **引用正确率**：`core/evaluate.py` 的 `evaluate_agent()` 端到端校验
   「回答引用的来源是否命中期望来源」。
 
-## 8. 参考项目（GitHub）
+## 9. 参考项目（GitHub）
 
 - 检索增强 / Agent：https://github.com/assafelovic/gpt-researcher
 - 向量库：https://github.com/milvus-io/milvus
