@@ -58,6 +58,7 @@ core/api.py      FastAPI 服务（可选依赖）
 | `core/embedding.py` | 本地 embedding + 余弦；可无缝切 BGE | BGE |
 | `core/finetune_bge.py` | 领域三元组构造 + 难负例挖掘 + MNR 对比损失微调 | BGE 微调 |
 | `core/agent.py` | rewrite→plan→action→verify→answer 五段循环 + 工具 | Agent 工作流 |
+| `core/diagnoser.py` | 多因聚合诊断：降精度扩召回 + LLM 聚类罗列多种可能原因 | 面向真实 trade-off |
 | `core/evaluate.py` | Recall@5 / MRR@10 / 引用正确率 + badcase | 评测体系 |
 | `core/ingest.py` | 文档解析（md/txt 原生，docx/pdf 可选）入库 | 解析手册/扫描件 |
 | `core/llm.py` | 本地 Ollama 封装（chat/generate/JSON），优雅降级 | 本地推理 |
@@ -111,7 +112,31 @@ python main.py api
 `sample_data/` 内置 6 篇示例文档，覆盖研发、临床、注册、质量、药物警戒五条业务线，
 是「本地数据库」的最小化样例；真实部署时把目录指向企业文档服务器即可。
 
-## 6. 简历指标如何复现
+## 6. 多因诊断：降精度换召回的真实 trade-off（重点设计）
+
+**核心洞察**：一个故障/生物现象往往由**多种原因**造成。事实类问题（「主要终点是什么」）
+答案唯一，要追求 precision；但诊断类问题（「纯度为什么偏低」）答案是一个**集合**，
+这时**故意降低搜索精度、扩大召回**，把多种可能原因都捞进来，再交给 LLM 聚类成
+「原因清单」罗列给提问者——提问者大多不是完全不会，而是**缺一个提示**，让他们自己
+对照排查，用户体验反而上升。
+
+| 模式 | 命令 | 检索策略 | 输出 |
+| :--- | :--- | :--- | :--- |
+| 精确问答 | `python main.py ask "..."` | 少召回(top_k=5)、precision 优先 | 一个带引用的结论 |
+| 多因诊断 | `python main.py diagnose "..."` | 扩召回(top_k×3)、多角度子查询、recall 优先 | LLM 聚类的原因清单 + 排查建议 |
+
+```bash
+# 对比同一批语料下两种模式的差异
+python main.py ask      "抗体 SEC-HPLC 纯度偏低可能有哪些原因？"
+python main.py diagnose "抗体 SEC-HPLC 纯度偏低可能有哪些原因？" --no-llm
+```
+
+`core/diagnoser.py` 三步：① 多面召回（原始问题 + LLM 拆的 2~3 个「原因方向」子查询，
+top_k 放大 3 倍）→ ② LLM 聚合（把候选聚类成「原因1/原因2/…」，每个带 [n] 引用）→
+③ 结构化输出（原因清单 + 排查建议）。`sample_data/07_质量_纯度偏低根因分析.md` 是专门
+为这个场景写的多因样本。
+
+## 7. 简历指标如何复现
 
 - **Recall@5 0.71→0.92、MRR@10 0.65→0.88**：`core/finetune_bge.py` 的
   `build_triples()` 造领域三元组 → `train()` 微调 BGE → `evaluate_before_after()`
@@ -120,7 +145,7 @@ python main.py api
 - **引用正确率**：`core/evaluate.py` 的 `evaluate_agent()` 端到端校验
   「回答引用的来源是否命中期望来源」。
 
-## 7. 参考项目（GitHub）
+## 8. 参考项目（GitHub）
 
 - 检索增强 / Agent：https://github.com/assafelovic/gpt-researcher
 - 向量库：https://github.com/milvus-io/milvus

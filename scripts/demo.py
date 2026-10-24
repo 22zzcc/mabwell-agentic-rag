@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.ingest import ingest_directory, load_index
 from core.agent import AgenticRAG
+from core.diagnoser import Diagnoser
 from core.evaluate import run_full_eval
 
 QUESTIONS = [
@@ -41,7 +42,14 @@ def main() -> None:
         print(f"A: {res.answer}")
         print()
 
-    print("③ 评测")
+    print("③ 多因诊断（降精度扩召回 → 罗列多种可能原因）")
+    diagnoser = Diagnoser(index, use_llm=False)
+    dr = diagnoser.diagnose("抗体 SEC-HPLC 纯度偏低可能有哪些原因？")
+    print(f"  召回候选 {dr.recall_count} 条：")
+    print("  " + dr.answer.replace("\n", "\n  ")[:600])
+    print()
+
+    print("④ 评测")
     result = run_full_eval(index)
     print(f"  Recall@5 = {result['retrieval']['recall@5']:.3f}")
     print(f"  MRR@10   = {result['retrieval']['mrr@10']:.3f}")

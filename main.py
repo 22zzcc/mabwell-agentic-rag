@@ -52,6 +52,28 @@ def cmd_ask(args: argparse.Namespace) -> None:
         print("⚠️  引用校验未通过（可能错引/幻觉），请人工复核。")
 
 
+def cmd_diagnose(args: argparse.Namespace) -> None:
+    from core.ingest import load_index
+    from core.diagnoser import Diagnoser
+
+    index = load_index()
+    diagnoser = Diagnoser(index, use_llm=not args.no_llm)
+    res = diagnoser.diagnose(args.question)
+
+    print("=" * 70)
+    print(f"问题   : {res.question}")
+    print(f"召回候选: {res.recall_count} 条（已放大召回，降精度换更全的原因覆盖）")
+    if res.facets:
+        print(f"检索角度: {'；'.join(res.facets)}")
+    print("-" * 70)
+    print(f"诊断清单:\n{res.answer}")
+    if res.citations:
+        print("-" * 70)
+        print("参考来源：")
+        for i, c in enumerate(res.citations[:12], start=1):
+            print(f"  [{i}] {c}")
+
+
 def cmd_eval(args: argparse.Namespace) -> None:
     from core.ingest import load_index
     from core.evaluate import run_full_eval
@@ -85,11 +107,17 @@ def main() -> None:
     p_ingest.add_argument("--data", default="sample_data", help="数据目录")
     p_ingest.set_defaults(func=cmd_ingest)
 
-    p_ask = sub.add_parser("ask", help="问答")
+    p_ask = sub.add_parser("ask", help="精确问答")
     p_ask.add_argument("question", help="问题")
     p_ask.add_argument("--no-llm", action="store_true",
                        help="跳过 LLM 改写/规划/生成，走快速降级路径（本地模型慢时用于演示）")
     p_ask.set_defaults(func=cmd_ask)
+
+    p_diag = sub.add_parser("diagnose", help="多因诊断（降精度扩召回，罗列多种可能原因）")
+    p_diag.add_argument("question", help="问题")
+    p_diag.add_argument("--no-llm", action="store_true",
+                        help="跳过 LLM 聚合，走快速降级路径")
+    p_diag.set_defaults(func=cmd_diagnose)
 
     p_eval = sub.add_parser("eval", help="评测")
     p_eval.add_argument("--llm", action="store_true",
