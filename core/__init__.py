@@ -16,6 +16,8 @@
     datasets      —— 数据集构建中枢（检索评测集/三元组/偏好对，eval+LoRA+PPO 三用）
     badcase       —— badcase 收集（上下文自动 + 对话反馈）+ 三个W分类 + 回归集
     memory        —— 长期记忆反馈模块（Critic 打分 + badcase 收取 + 自我迭代）
+    interaction   —— 交互式记忆（「这个问题你上次也提过相似的」多维度思考）
+    research_badcase —— 科研 bad case 三分类（确凿错误/可能新发现/不同表征）
     evaluate      —— Recall@5 / MRR@10 / 引用正确率 + badcase
     api           —— FastAPI 服务封装（可选依赖）
 """

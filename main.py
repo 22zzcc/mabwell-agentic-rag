@@ -51,6 +51,15 @@ def cmd_ask(args: argparse.Namespace) -> None:
     if res.degraded:
         print("⚠️  引用校验未通过（可能错引/幻觉），请人工复核。")
 
+    # 交互式记忆：记录本次问答，并在遇到相似历史问题时提示「多维度思考」
+    from core.interaction import ConversationMemory
+    mem = ConversationMemory()
+    nudge = mem.nudge(args.question)
+    mem.add(args.question, res.answer)
+    if nudge:
+        print("-" * 70)
+        print(nudge)
+
 
 def cmd_diagnose(args: argparse.Namespace) -> None:
     from core.ingest import load_index
@@ -216,6 +225,12 @@ def main() -> None:
 
     p_fb = sub.add_parser("feedback", help="长期记忆反馈闭环（评论家+badcase+反哺）")
     p_fb.set_defaults(func=cmd_feedback)
+
+    def _cmd_benchmark(_args):
+        from scripts.benchmark import main as bm
+        bm()
+    p_bm = sub.add_parser("benchmark", help="检索基准（树状chunk/扩召回的trade-off量化）")
+    p_bm.set_defaults(func=_cmd_benchmark)
 
     p_api = sub.add_parser("api", help="启动 FastAPI 服务")
     p_api.add_argument("--host", default="127.0.0.1")
