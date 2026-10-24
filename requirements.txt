@@ -1,0 +1,15 @@
+# 核心运行时依赖（离线可跑的最小集）
+requests>=2.31
+numpy>=1.24
+
+# ---- 以下为可选依赖，按需安装，缺失时相关模块会给出清晰指引 ----
+# 本地检索加速（BM25 的经典实现，核心已内置纯 Python 版，装了更快）
+# rank-bm25>=0.2.2
+
+# BGE 微调（core/finetune_bge.py 训练脚本用；仅评测不需要）
+# torch>=2.1
+# sentence-transformers>=2.2
+
+# Web 服务（core/api.py；CLI 演示不需要）
+# fastapi>=0.110
+# uvicorn[standard]>=0.27

@@ -1,0 +1,131 @@
+# Mabwell Agentic RAG · 面向生物制药本地知识库的 Agentic RAG
+
+> 一句话：把「普通 RAG」升级成「会自己规划检索策略、多跳查资料、带引用作答」的
+> **Agentic RAG**，面向迈威生物（Mabwell）这类生物制药企业的**本地数据库场景**——
+> 研发方案、临床方案、CTD 申报、GMP 质量、药物警戒 SOP 全部在**内网/本地**完成，
+> 数据不出域。
+
+本项目从我的本地 RAG 项目（`harbor-deep` 的 RAG+Agent 架构）改造而来，把「港口设备故障诊断」
+的领域知识替换为「生物制药」领域，并补齐了简历里可复现的量化指标（Recall@5 / MRR@10）。
+
+---
+
+## 1. 为什么是「Agentic RAG」而不是普通 RAG
+
+| | 普通 RAG | Agentic RAG（本项目） |
+| :--- | :--- | :--- |
+| 检索次数 | 固定一次 | 由 Agent 决定查几次、拆不拆子问题 |
+| 查询处理 | 原样向量化 | 先**改写**（缩写展开/术语标准化） |
+| 多跳问题 | 往往答不全 | **规划**拆成子查询逐个查，再聚合 |
+| 可溯源性 | 弱 | 每个结论带 `[n]` 引用 + 参考来源 |
+| 失败兜底 | 无 | 每步都有降级路径，离线不崩 |
+
+生物制药场景天然需要 Agentic：一句「9MW2821 的Ⅲ期主要终点是什么、对照药是什么、
+它的载荷是 MMAE 吗」同时跨**临床、研发**两份文档，普通 RAG 一次检索很难全命中。
+
+---
+
+## 2. 架构
+
+```
+用户提问
+   │
+   ▼
+┌──────────────────────────────────────────────────┐
+│  core/agent.py    Agentic 主循环                  │
+│  rewrite(改写) → plan(规划) → retrieve(检索)        │
+│  → verify(引用校验) → answer(带[n]引用作答)          │
+└───────┬──────────────────────────────────────────┘
+        │ 调用工具
+        ├──► core/vector_store.py   混合检索（BM25 + 稠密 + RRF）
+        │        ├── core/embedding.py   本地向量化（mxbai / 可切 BGE）
+        │        └── core/document_tree.py 文档→章节→条目 分块
+        ├──► core/llm.py            本地生成（Ollama qwen3）
+        │
+        ▼
+core/ingest.py  解析文档(sample_data) → 建索引 → 落盘(data/index)
+core/evaluate.py  Recall@5 / MRR@10 / 引用正确率 + badcase
+core/finetune_bge.py  BGE 领域微调（三元组 + 对比损失）
+core/api.py      FastAPI 服务（可选依赖）
+```
+
+## 3. 模块职责
+
+| 文件 | 职责 | 对应简历 |
+| :--- | :--- | :--- |
+| `core/document_tree.py` | 还原「文档→章节→条目」三级层级 + 句界分块 | 知识库构建 |
+| `core/vector_store.py` | 手写 BM25 + 稠密向量 + RRF(k=60) 混合检索 + 本地持久化 | 混合检索 |
+| `core/embedding.py` | 本地 embedding + 余弦；可无缝切 BGE | BGE |
+| `core/finetune_bge.py` | 领域三元组构造 + 难负例挖掘 + MNR 对比损失微调 | BGE 微调 |
+| `core/agent.py` | rewrite→plan→action→verify→answer 五段循环 + 工具 | Agent 工作流 |
+| `core/evaluate.py` | Recall@5 / MRR@10 / 引用正确率 + badcase | 评测体系 |
+| `core/ingest.py` | 文档解析（md/txt 原生，docx/pdf 可选）入库 | 解析手册/扫描件 |
+| `core/llm.py` | 本地 Ollama 封装（chat/generate/JSON），优雅降级 | 本地推理 |
+| `core/config.py` | .env 三层装载 + 路径统一解析 | 落地工程化 |
+| `core/api.py` | FastAPI 服务封装 | FastAPI 落地 |
+
+## 4. 快速开始（离线可跑）
+
+前置：已安装 [Ollama](https://ollama.com) 并拉取模型：
+
+```bash
+ollama pull qwen3:4b
+ollama pull mxbai-embed-large
+```
+
+```bash
+cd mabwell-agentic-rag
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt          # 核心只需 requests + numpy
+
+# ① 建库（解析 sample_data → Document-Tree 分块 → 混合索引）
+python main.py ingest
+
+# ② 问答（Agentic：改写 → 规划 → 多跳检索 → 引用作答）
+python main.py ask "9MW2821 的Ⅲ期临床主要终点和对照方案分别是什么？"
+
+# ②' 快速问答（跳过 LLM 改写/规划/生成，只走检索+模板作答，秒级返回；
+#     本地 qwen3:4b 较慢时用它演示 Agent 的检索/引用链路）
+python main.py ask "9MW2821 的Ⅲ期临床主要终点和对照方案分别是什么？" --no-llm
+
+# ③ 一键评测（Recall@5 / MRR@10 / 引用正确率）
+python main.py eval
+
+# ④ 启动 FastAPI 服务（可选，需 pip install fastapi uvicorn）
+python main.py api
+```
+
+一键端到端演示：`python scripts/demo.py`
+
+## 5. 领域迁移：从「港口设备」到「生物制药」
+
+简历里的「设备名/故障码/症状」→ 生物制药里的「靶点/药物代号/临床术语」：
+
+| 原领域（港口） | 现领域（生物制药） |
+| :--- | :--- |
+| 设备名（堆取料机） | 靶点/药物（Nectin-4、9MW2821） |
+| 故障码（E101） | 临床术语（PFS、ORR、SAE、CTCAE） |
+| 症状描述（异响/过热） | 终点/工艺描述（主要终点、DAR、偶联） |
+| 手册/工单 | 研发方案/临床方案/CTD/GMP/SOP |
+
+`sample_data/` 内置 6 篇示例文档，覆盖研发、临床、注册、质量、药物警戒五条业务线，
+是「本地数据库」的最小化样例；真实部署时把目录指向企业文档服务器即可。
+
+## 6. 简历指标如何复现
+
+- **Recall@5 0.71→0.92、MRR@10 0.65→0.88**：`core/finetune_bge.py` 的
+  `build_triples()` 造领域三元组 → `train()` 微调 BGE → `evaluate_before_after()`
+  对比训练前后指标。本项目当前基线（通用 embedding，未微调）约 Recall@5≈0.88，
+  微调后仍有提升空间——这正是面试时讲「领域微调价值」的现场素材。
+- **引用正确率**：`core/evaluate.py` 的 `evaluate_agent()` 端到端校验
+  「回答引用的来源是否命中期望来源」。
+
+## 7. 参考项目（GitHub）
+
+- 检索增强 / Agent：https://github.com/assafelovic/gpt-researcher
+- 向量库：https://github.com/milvus-io/milvus
+- 中文 embedding 基座：https://github.com/FlagOpen/FlagEmbedding （BAAI/bge）
+- 生产级 RAG 工程参考：https://github.com/infiniflow/ragflow 、https://github.com/langgenius/dify
+
+> 本项目刻意「手搓」检索/BM25/Agent 循环，是为了把原理讲透（也是面试加分项）；
+> 生产可直接换 Milvus + LangGraph 等成熟组件，接口已按「可替换」设计。

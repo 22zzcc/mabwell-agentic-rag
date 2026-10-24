@@ -1,0 +1,7 @@
+# 索引目录（运行时生成，含向量与 BM25 倒排，勿提交）
+data/
+__pycache__/
+*.pyc
+.venv/
+config/.env
+.DS_Store
