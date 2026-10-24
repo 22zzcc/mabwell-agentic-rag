@@ -45,7 +45,7 @@ def main() -> None:
     print("③ 多因诊断（降精度扩召回 → 罗列多种可能原因）")
     diagnoser = Diagnoser(index, use_llm=False)
     dr = diagnoser.diagnose("抗体 SEC-HPLC 纯度偏低可能有哪些原因？")
-    print(f"  召回候选 {dr.recall_count} 条：")
+    print(f"  精准检索命中 {dr.hit_count} 条：")
     print("  " + dr.answer.replace("\n", "\n  ")[:600])
     print()
 

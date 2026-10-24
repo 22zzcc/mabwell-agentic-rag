@@ -71,9 +71,8 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
 
     print("=" * 70)
     print(f"问题   : {res.question}")
-    print(f"召回候选: {res.recall_count} 条（已放大召回，降精度换更全的原因覆盖）")
-    if res.facets:
-        print(f"检索角度: {'；'.join(res.facets)}")
+    print(f"问题重写: {'；'.join(res.sub_queries) if res.sub_queries else '-'}")
+    print(f"精准检索: 命中 {res.hit_count} 条（树状chunk每个节点=一个原因，直接命中）")
     print("-" * 70)
     print(f"诊断清单:\n{res.answer}")
     if res.citations:
