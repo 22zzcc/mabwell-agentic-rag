@@ -163,10 +163,16 @@ class HybridIndex:
 
     # ---- 建库 ----
     def add(self, text: str, meta: dict) -> None:
-        """加入一个块。注意：embedding 在 save 时统一做（批量更快）。"""
+        """加入一个块。注意：embedding 在 save 时统一做（批量更快）。
+
+        检索侧的关键设计：BM25 索引「标题路径 + 正文」，而不是只索正文——
+        否则「只有序列、不含实体名」的块（如 VH/VL 序列）无法被「9MW2821 序列」
+        这类查询命中；稠密侧仍只用正文做语义向量。
+        """
         doc_id = len(self.chunks)
         self.chunks.append({"id": doc_id, "text": text, "meta": meta})
-        self.bm25.add(doc_id, tokenize(text))
+        index_text = " ".join(filter(None, [meta.get("heading_path", ""), text]))
+        self.bm25.add(doc_id, tokenize(index_text))
 
     def build_dense(self, batch_size: int = 8) -> None:
         """对全部块批量向量化（Ollama embedding）。"""

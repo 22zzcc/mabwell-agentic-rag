@@ -11,6 +11,7 @@
     ingest        —— 文档解析入库（把 sample_data 建成可检索索引）
     agent         —— Agentic 循环（改写→规划→检索→验证→作答）+ 工具
     diagnoser     —— 多因聚合诊断（降精度扩召回，LLM 聚类罗列多种可能原因）
+    bio_agent     —— 生物制药领域 Agent（蛋白理化/演化保守性计算 + RAG 药性推导）
     finetune_bge  —— BGE 领域微调管线（三元组 + 对比损失）
     evaluate      —— Recall@5 / MRR@10 / 引用正确率 + badcase
     api           —— FastAPI 服务封装（可选依赖）

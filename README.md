@@ -48,6 +48,7 @@ core/ingest.py  解析文档(sample_data) → 建索引 → 落盘(data/index)
 core/evaluate.py  Recall@5 / MRR@10 / 引用正确率 + badcase
 core/finetune_bge.py  BGE 领域微调（三元组 + LoRA(PEFT)）
 core/diagnoser.py  多因诊断（降精度扩召回 → 罗列多种可能原因）
+core/bio_agent.py  生物制药领域 Agent（蛋白理化/演化保守性 + RAG 药性推导）
 core/api.py      FastAPI 服务（可选依赖）
 ```
 
@@ -61,6 +62,7 @@ core/api.py      FastAPI 服务（可选依赖）
 | `core/finetune_bge.py` | 领域三元组 + 难负例挖矿 + **LoRA(PEFT) 微调**（全量微调作对比） | BGE 微调 + LoRA |
 | `core/agent.py` | rewrite→plan→action→verify→answer 五段循环 + 工具 | Agent 工作流 |
 | `core/diagnoser.py` | 多因聚合诊断：降精度扩召回 + LLM 聚类罗列多种可能原因 | 面向真实 trade-off |
+| `core/bio_agent.py` | 生物制药领域 Agent：蛋白理化/演化保守性计算 + RAG 药性推导 | 基于生物制药的 agent 开发 |
 | `core/evaluate.py` | Recall@5 / MRR@10 / 引用正确率 + badcase | 评测体系 |
 | `core/pdf_parser.py` | 企业 PDF 解析：水印净化 / 双栏顺序 / 扫描件 OCR / 噪声过滤 | 解析手册/扫描件 |
 | `core/ingest.py` | 文档解析（md/txt 原生，docx/pdf 走 pdf_parser 管线）入库 | 知识库构建 |
@@ -92,10 +94,16 @@ python main.py ask "9MW2821 的Ⅲ期临床主要终点和对照方案分别是�
 #     本地 qwen3:4b 较慢时用它演示 Agent 的检索/引用链路）
 python main.py ask "9MW2821 的Ⅲ期临床主要终点和对照方案分别是什么？" --no-llm
 
-# ③ 一键评测（Recall@5 / MRR@10 / 引用正确率）
+# ③ 多因诊断（降精度扩召回，罗列多种可能原因）
+python main.py diagnose "抗体 SEC-HPLC 纯度偏低可能有哪些原因？" --no-llm
+
+# ④ 生物制药领域 Agent（蛋白演化表征 + 药性推导）
+python main.py bio "分析 9MW2821 抗体的演化表征与药性特性" --no-llm
+
+# ⑤ 一键评测（Recall@5 / MRR@10 / 引用正确率）
 python main.py eval
 
-# ④ 启动 FastAPI 服务（可选，需 pip install fastapi uvicorn）
+# ⑥ 启动 FastAPI 服务（可选，需 pip install fastapi uvicorn）
 python main.py api
 ```
 
@@ -160,7 +168,27 @@ top_k 放大 3 倍）→ ② LLM 聚合（把候选聚类成「原因1/原因2/�
 ③ 结构化输出（原因清单 + 排查建议）。`sample_data/07_质量_纯度偏低根因分析.md` 是专门
 为这个场景写的多因样本。
 
-## 8. 简历指标如何复现
+## 8. 基于生物制药的领域 Agent（BioAgent）
+
+**核心定位（面试最该讲的一句）**：生物制药公司不缺「会写代码的 agent」，缺的是「会做科学的 agent」。
+同一个 agent harness（ReAct + 工具 + RAG + 上下文管理），把工具从 Read/Write/Bash 换成
+「蛋白理化计算 / 演化保守性分析 / 知识检索」，就变成：**发一句话 → 结合本地数据库 → 推导药性特性**。
+
+```bash
+python main.py bio "分析 9MW2821 抗体的演化表征与药性特性"
+```
+
+`core/bio_agent.py` 三步：
+1. **检索**：多面召回取「既有结果」（已知亲和力 KD、热稳定性 Tm、序列与演化注释），并抽取序列；
+2. **计算**（纯 Python，不依赖 Biopython）：`protein_properties()` 算 MW/pI/GRAVY/氨基酸组成，
+   `conservation_profile()` 按位点 Shannon 熵算保守性 → 识别保守区（功能约束）与可变区（演化适应）；
+3. **推导**：LLM 把「数据库既有结果 + 计算特征」综合成药性推导，带引用、不编造。
+
+这正回答「为什么 coding agent 不是重点、但 agent 开发是重点」：coding-agent-mvp 证明的是
+agent harness（工具/权限/上下文/路由），BioAgent 把同一套 harness 的**工具层**换成生物制药
+领域工具，让 Agent 干「科学推理」而不是「改代码」——而这套体系**没有强大 RAG 是撑不起来的**。
+
+## 9. 简历指标如何复现
 
 - **Recall@5 0.71→0.92、MRR@10 0.65→0.88**：`core/finetune_bge.py` 的
   `build_triples()` 造领域三元组（BM25 难负例挖矿）→ `train_lora()` 用 **LoRA(PEFT)**
@@ -170,7 +198,7 @@ top_k 放大 3 倍）→ ② LLM 聚合（把候选聚类成「原因1/原因2/�
 - **引用正确率**：`core/evaluate.py` 的 `evaluate_agent()` 端到端校验
   「回答引用的来源是否命中期望来源」。
 
-## 9. 参考项目（GitHub）
+## 10. 参考项目（GitHub）
 
 - 检索增强 / Agent：https://github.com/assafelovic/gpt-researcher
 - 向量库：https://github.com/milvus-io/milvus

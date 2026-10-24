@@ -74,6 +74,33 @@ def cmd_diagnose(args: argparse.Namespace) -> None:
             print(f"  [{i}] {c}")
 
 
+def cmd_bio(args: argparse.Namespace) -> None:
+    from core.ingest import load_index
+    from core.bio_agent import BioAgent
+
+    index = load_index()
+    agent = BioAgent(index, use_llm=not args.no_llm)
+    res = agent.run(args.request)
+
+    print("=" * 70)
+    print(f"请求   : {res.request}")
+    print(f"提取序列: {len(res.sequences)} 条")
+    if res.properties:
+        for p in res.properties:
+            print(f"  理化性质: 长度 {p.get('length')} / 分子量 {p.get('mw_da')} Da "
+                  f"/ pI {p.get('pi')} / GRAVY {p.get('gravy')}")
+    if res.conservation:
+        print(f"  演化保守性: 保守位点 {len(res.conservation['conserved_positions'])} 个 / "
+              f"可变位点 {len(res.conservation['variable_positions'])} 个")
+    print("-" * 70)
+    print(f"药性推导:\n{res.answer}")
+    if res.citations:
+        print("-" * 70)
+        print("参考来源：")
+        for i, c in enumerate(res.citations[:8], start=1):
+            print(f"  [{i}] {c}")
+
+
 def cmd_eval(args: argparse.Namespace) -> None:
     from core.ingest import load_index
     from core.evaluate import run_full_eval
@@ -118,6 +145,12 @@ def main() -> None:
     p_diag.add_argument("--no-llm", action="store_true",
                         help="跳过 LLM 聚合，走快速降级路径")
     p_diag.set_defaults(func=cmd_diagnose)
+
+    p_bio = sub.add_parser("bio", help="生物制药领域 Agent（蛋白演化表征 + 药性推导）")
+    p_bio.add_argument("request", help="自然语言请求，如：分析 9MW2821 抗体的演化表征与药性特性")
+    p_bio.add_argument("--no-llm", action="store_true",
+                       help="跳过 LLM 推导，走快速降级路径")
+    p_bio.set_defaults(func=cmd_bio)
 
     p_eval = sub.add_parser("eval", help="评测")
     p_eval.add_argument("--llm", action="store_true",
