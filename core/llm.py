@@ -35,7 +35,7 @@ class LLMError(RuntimeError):
         self.reason = reason
 
 
-def _post_json(url: str, payload: dict, timeout: int = 120) -> dict:
+def _post_json(url: str, payload: dict, timeout: int = 300) -> dict:
     """用标准库 POST JSON；requests 可用时用 requests（支持流式与重试）。
 
     统一收口：所有 HTTP 错误都转成带上下文的 LLMError，调用方无需关心底层库。

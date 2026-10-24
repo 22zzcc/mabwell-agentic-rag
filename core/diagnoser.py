@@ -104,12 +104,19 @@ class Diagnoser:
                      for h in hits]
         return hits, citations
 
+    # 聚合上下文上限：召回可以很宽（recall 优先），但喂给 LLM 的候选设个上限，
+    # 既保证「多种原因都进清单」，又避免本地慢模型因上下文过长而超时。
+    _AGGREGATE_TOP_K = 15
+
     # ---- ② LLM 聚合：把候选聚类成「可能原因清单」 ----
     def _aggregate(self, question: str, hits: list[Hit]) -> str:
         if not hits:
             return "（知识库中未检索到相关内容）"
+
+        # 取召回里最靠前的 _AGGREGATE_TOP_K 条做聚合（召回仍全量计数，见 recall_count）
+        top = hits[:_AGGREGATE_TOP_K]
         blocks = []
-        for i, h in enumerate(hits, start=1):
+        for i, h in enumerate(top, start=1):
             src = h.meta.get("heading_path", "") or h.meta.get("doc", "")
             blocks.append(f"[{i}] {src}\n    {h.text}")
         context = "\n\n".join(blocks)
@@ -117,14 +124,15 @@ class Diagnoser:
         if not self.use_llm:
             # 快速降级：不生成，直接把召回片段按标题罗列（同样体现「罗列」语义）
             lines = [f"- {h.meta.get('entry', h.meta.get('chapter',''))}："
-                     f"{h.text[:80]}" for h in hits[:8]]
+                     f"{h.text[:80]}" for h in top[:8]]
             return "（离线快速模式，未调用生成模型）资料中可能相关的原因/条目：\n" + "\n".join(lines)
 
         try:
             return chat([{"role": "user", "content":
                           _AGGREGATE_PROMPT.format(context=context, question=question)}])
-        except Exception:
-            return self._aggregate(question, hits[:0]) or "（生成失败，请检查 Ollama）"
+        except Exception as e:
+            # 生成失败时明确报错，绝不把「检索到内容」误报成「未检索到」
+            return f"（聚合生成失败：{type(e).__name__}。可改用 --no-llm 快速罗列召回条目）"
 
     # ---- 总入口 ----
     def diagnose(self, question: str) -> DiagnoseResult:
