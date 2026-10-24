@@ -12,7 +12,10 @@
     agent         —— Agentic 循环（改写→规划→检索→验证→作答）+ 工具
     diagnoser     —— 多因聚合诊断（降精度扩召回，LLM 聚类罗列多种可能原因）
     bio_agent     —— 生物制药领域 Agent（蛋白理化/演化保守性计算 + RAG 药性推导）
-    finetune_bge  —— BGE 领域微调管线（三元组 + 对比损失）
+    finetune_bge  —— BGE 领域微调管线（三元组 + LoRA/全量）
+    datasets      —— 数据集构建中枢（检索评测集/三元组/偏好对，eval+LoRA+PPO 三用）
+    badcase       —— badcase 收集（上下文自动 + 对话反馈）+ 三个W分类 + 回归集
+    memory        —— 长期记忆反馈模块（Critic 打分 + badcase 收取 + 自我迭代）
     evaluate      —— Recall@5 / MRR@10 / 引用正确率 + badcase
     api           —— FastAPI 服务封装（可选依赖）
 """

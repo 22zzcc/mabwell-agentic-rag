@@ -101,6 +101,60 @@ def cmd_bio(args: argparse.Namespace) -> None:
             print(f"  [{i}] {c}")
 
 
+def cmd_build_data(args: argparse.Namespace) -> None:
+    """构建三类数据集（检索评测集 / LoRA 三元组 / 偏好对）并版本化落盘。"""
+    from core.ingest import load_index
+    from core.evaluate import GOLDEN
+    from core.datasets import DatasetHub, build_retrieval_set, build_triples
+
+    index = load_index()
+    hub = DatasetHub()
+
+    retr = build_retrieval_set(index, GOLDEN)
+    triples = build_triples(index, GOLDEN)
+    hub.save("retrieval_eval", retr)
+    hub.save("triples_lora", [t.__dict__ for t in triples])
+
+    print("=" * 70)
+    print(f"检索评测集 : {retr['n']} 条（含 BM25 难负例）")
+    print(f"LoRA 三元组: {len(triples)} 条")
+    print(f"落盘目录   : {hub.root}")
+    print("（偏好对由对话反馈动态生成，见 `python main.py feedback`）")
+
+
+def cmd_feedback(args: argparse.Namespace) -> None:
+    """演示长期记忆反馈闭环：评论家打分 → badcase 落库 → 反哺数据集。"""
+    from core.ingest import load_index
+    from core.memory import Critic
+
+    index = load_index()
+    critic = Critic(index)
+
+    print("=" * 70)
+    print("① 评论家打分：一个「漏召回」坏例")
+    q = "9MW2821 抗体的结合亲和力是多少？"
+    bad_answer = "资料中未提及"
+    hits = index.search(q, top_k=5)
+    verdict = critic.judge(q, bad_answer, citations=[], hits=hits)
+    print(f"   得分 {verdict['score']}，issues={verdict['issues']}")
+
+    print("② badcase 落库长期记忆 + 自我迭代")
+    r = critic.self_iterate(q, bad_answer, citations=[], hits=hits)
+    print(f"   记忆累计 badcase {r['new_badcases']} 条；偏好对 {r['preference_pairs']} 条")
+    print(f"   回归集 {r['regression']}")
+
+    print("③ 对话反馈 → 偏好对（喂 PPO/DPO）")
+    critic.collect_user_feedback(
+        "9MW2821 靶向什么靶点？", "靶向 HER2", "靶向 Nectin-4（更准确）")
+    fb = critic.feedback_to_datasets()
+    critic.memory.save()
+    print(f"   偏好对 {len(fb['preference_pairs'])} 条：")
+    for p in fb["preference_pairs"]:
+        print(f"     prompt  : {p.prompt}")
+        print(f"     rejected: {p.rejected}")
+        print(f"     chosen  : {p.chosen}")
+
+
 def cmd_eval(args: argparse.Namespace) -> None:
     from core.ingest import load_index
     from core.evaluate import run_full_eval
@@ -156,6 +210,12 @@ def main() -> None:
     p_eval.add_argument("--llm", action="store_true",
                         help="端到端评测真调本地模型（默认走快速降级路径，秒级）")
     p_eval.set_defaults(func=cmd_eval)
+
+    p_data = sub.add_parser("build-data", help="构建数据集（检索评测集/LoRA三元组）")
+    p_data.set_defaults(func=cmd_build_data)
+
+    p_fb = sub.add_parser("feedback", help="长期记忆反馈闭环（评论家+badcase+反哺）")
+    p_fb.set_defaults(func=cmd_feedback)
 
     p_api = sub.add_parser("api", help="启动 FastAPI 服务")
     p_api.add_argument("--host", default="127.0.0.1")

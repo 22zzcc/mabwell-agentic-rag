@@ -63,6 +63,9 @@ core/api.py      FastAPI 服务（可选依赖）
 | `core/agent.py` | rewrite→plan→action→verify→answer 五段循环 + 工具 | Agent 工作流 |
 | `core/diagnoser.py` | 多因聚合诊断：降精度扩召回 + LLM 聚类罗列多种可能原因 | 面向真实 trade-off |
 | `core/bio_agent.py` | 生物制药领域 Agent：蛋白理化/演化保守性计算 + RAG 药性推导 | 基于生物制药的 agent 开发 |
+| `core/datasets.py` | 数据集构建中枢：检索评测集 / LoRA 三元组 / PPO 偏好对（三用） | 偏好数据构建 |
+| `core/badcase.py` | badcase 收集（上下文自动 + 对话反馈）+ 三个W分类 + 回归集 | 偏好数据构建 |
+| `core/memory.py` | 长期记忆反馈模块：Critic 打分 + badcase 收取 + 自我迭代 | 数据闭环 |
 | `core/evaluate.py` | Recall@5 / MRR@10 / 引用正确率 + badcase | 评测体系 |
 | `core/pdf_parser.py` | 企业 PDF 解析：水印净化 / 双栏顺序 / 扫描件 OCR / 噪声过滤 | 解析手册/扫描件 |
 | `core/ingest.py` | 文档解析（md/txt 原生，docx/pdf 走 pdf_parser 管线）入库 | 知识库构建 |
@@ -100,10 +103,16 @@ python main.py diagnose "抗体 SEC-HPLC 纯度偏低可能有哪些原因？" -
 # ④ 生物制药领域 Agent（蛋白演化表征 + 药性推导）
 python main.py bio "分析 9MW2821 抗体的演化表征与药性特性" --no-llm
 
-# ⑤ 一键评测（Recall@5 / MRR@10 / 引用正确率）
+# ⑤ 构建数据集（检索评测集 + LoRA 三元组，含 BM25 难负例）
+python main.py build-data
+
+# ⑥ 长期记忆反馈闭环（评论家打分 + badcase + 偏好对反哺）
+python main.py feedback
+
+# ⑦ 一键评测（Recall@5 / MRR@10 / 引用正确率）
 python main.py eval
 
-# ⑥ 启动 FastAPI 服务（可选，需 pip install fastapi uvicorn）
+# ⑧ 启动 FastAPI 服务（可选，需 pip install fastapi uvicorn）
 python main.py api
 ```
 
@@ -188,7 +197,31 @@ python main.py bio "分析 9MW2821 抗体的演化表征与药性特性"
 agent harness（工具/权限/上下文/路由），BioAgent 把同一套 harness 的**工具层**换成生物制药
 领域工具，让 Agent 干「科学推理」而不是「改代码」——而这套体系**没有强大 RAG 是撑不起来的**。
 
-## 9. 简历指标如何复现
+## 9. 数据闭环：badcase → 数据集 → LoRA/PPO → 回归
+
+数据是 RAG/Agent 的天花板。本项目把「数据构建」做成独立闭环，badcase 有两个在线来源
+（不只靠离线评测）：
+
+```bash
+python main.py build-data   # 检索评测集 + LoRA 三元组（BM25 难负例挖矿）
+python main.py feedback     # 评论家打分 → badcase 落库 → 偏好对反哺
+```
+
+| 模块 | 职责 | 喂给谁 |
+| :--- | :--- | :--- |
+| `core/datasets.py` | 检索评测集 / LoRA 三元组 / PPO 偏好对 三类数据统一构建、版本化 | eval / LoRA / PPO |
+| `core/badcase.py` | **上下文自动**（引用越界/漏召回/低相关/零召回）+ **对话反馈**（用户纠正） | 回归集 |
+| `core/memory.py` | **长期记忆反馈模块 = PPO 里的评论家 + badcase 收取**：打分、落库、反哺、自我迭代 | 全链路 |
+
+**关键设计**（面试可讲）：
+- 检索评测集里的 **BM25 难负例**（词面相关但非答案）既是评测干扰项，又被复用为 LoRA 难负例，
+  一份数据三处用；
+- badcase 按「三个 W」分类（What 现象 / Why 根因 / Way 修复），检索类坏例进回归集，
+  反馈类坏例转偏好对喂 PPO/DPO；
+- 「长期记忆」让 badcase 跨会话沉淀成资产，实现「越用越准」的自我迭代——这就是
+  评论家（critic）比普通 PPO critic 多出的那一个「badcase 收取」能力。
+
+## 10. 简历指标如何复现
 
 - **Recall@5 0.71→0.92、MRR@10 0.65→0.88**：`core/finetune_bge.py` 的
   `build_triples()` 造领域三元组（BM25 难负例挖矿）→ `train_lora()` 用 **LoRA(PEFT)**
@@ -198,7 +231,7 @@ agent harness（工具/权限/上下文/路由），BioAgent 把同一套 harnes
 - **引用正确率**：`core/evaluate.py` 的 `evaluate_agent()` 端到端校验
   「回答引用的来源是否命中期望来源」。
 
-## 10. 参考项目（GitHub）
+## 11. 参考项目（GitHub）
 
 - 检索增强 / Agent：https://github.com/assafelovic/gpt-researcher
 - 向量库：https://github.com/milvus-io/milvus

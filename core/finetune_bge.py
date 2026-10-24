@@ -59,8 +59,10 @@ def build_triples(golden: list[dict], index: HybridIndex,
     triples: list[Triple] = []
     for g in golden:
         q = g["question"]
+        # 兼容两种黄金集字段：relevant（evaluate.GOLDEN）或 positive_path
+        rel = g.get("relevant") or g.get("positive_path", "")
         positives = [c["text"] for c in index.chunks
-                     if g["positive_path"] in c["meta"].get("heading_path", "")]
+                     if rel and rel in c["meta"].get("heading_path", "")]
         if not positives:
             continue
         pos = positives[0]
